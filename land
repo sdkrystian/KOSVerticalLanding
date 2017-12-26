@@ -1,0 +1,158 @@
+set state to 9.
+set update to true.
+
+set STEERINGMANAGER:MAXSTOPPINGTIME to 5.
+set STEERINGMANAGER:YAWPID:KD to 0.01.
+set STEERINGMANAGER:YAWPID:KI to 0.1.
+set STEERINGMANAGER:YAWPID:KD to 0.4.
+set STEERINGMANAGER:YAWTS to 3.
+
+set burnthrottle to 0.002.
+
+set pad to SHIP:GEOPOSITION.
+set olddistance to 0.
+set targetdistance to 0.
+set targetdirection to 0.
+
+set steeringdirection to 90.
+set steeringpitch to 90.
+lock STEERING to HEADING(steeringdirection, steeringpitch).
+
+lock craftheight to 2.
+lock realaltitude to ALT:RADAR - craftheight.
+lock gravity to SHIP:SENSORS:GRAV:MAG.
+lock enginethrust to SHIP:MAXTHRUST / SHIP:MASS.
+lock realenginethrust to SHIP:MAXTHRUSTAT(SHIP:Q) / SHIP:MASS.
+lock burnaltitude to (SHIP:VERTICALSPEED ^ 2) / (2 * ((realenginethrust - gravity) + ((gravity + scalar(SHIP:SENSORS:ACC, UP:VECTOR)) / 2))).
+
+set climb to pidloop(0.05, 0.1, 0.002, 0, 1).
+set hover to pidloop(0.25, 0.001, 0.6, -200, 200).  
+set hover:SETPOINT to 1.
+
+clearscreen.
+sas off.
+stage.
+rcs on.
+lock THROTTLE to 1.
+
+until update = false
+{
+	print "Max Thrust: " + round(enginethrust, 2) + "m/s           " at  (0,0).
+	print "Actual Max Thrust: " + round(realenginethrust, 2) + "m/s           " at  		(0,1).
+	print "Vertical Speed: " + round(abs(SHIP:VERTICALSPEED), 2) + "m/s           " at (0,2).
+	print "Real Altitude: " + round(realaltitude, 2) + "m           " at (0,3).
+	print "Burn Altitude: " + round(burnaltitude, 2) + "m           " at (0,4).
+	print "Throttle: " + round(burnthrottle * 100, 2) + "%           " at (0,5).
+	print "Booster Distance to Pad: " + round(distance(SHIP:GEOPOSITION, pad), 2) + "m           " at (0,6).
+	print "Impact Distance to Pad: " + round(targetdistance, 2) + "m           " at (0,7).
+	print "Steer Direction: " + round(steeringdirection, 2) + "deg           " at (0,8).
+	
+	when state = 9 and ADDONS:TR:HASIMPACT then
+	{
+		lock targetdistance to distance(pad, ADDONS:TR:IMPACTPOS).
+		lock targetdirection to direction(ADDONS:TR:IMPACTPOS, pad).
+		set state to 8.
+	}
+	
+	when state = 8 then 
+	{
+		set steeringpitch to 90 * (30000 - SHIP:ALTITUDE) / 30000.
+	}
+	
+	when state = 8 and realaltitude > 20000 then
+	{
+		lock THROTTLE to 0.
+		stage.
+		ADDONS:TR:SETTARGET(pad).
+		set state to 7.
+	}
+	
+	when state = 7 then 
+	{
+		print "ORIENTING FOR BOOSTBACK                      " at (0,10).
+		set steeringdirection to targetdirection - 180.
+		set steeringpitch to 0.
+		if VANG(HEADING(steeringdirection, steeringpitch):VECTOR, SHIP:FACING:VECTOR) < 2 
+		{
+			print "FIRING BOOSTBACK BURN                      " at (0,10).
+			lock THROTTLE to 1.
+			set state to 6.
+		}
+	}
+	
+	when state = 6 and targetdistance < 1000 and targetdistance > olddistance then
+	{
+		print "BOOSTBACK BURN COMPLETE                     " at (0,10).
+		lock THROTTLE to 0.
+		unlock STEERING.
+		sas on.
+		set state to 5.
+	}
+	
+	when state = 5 then
+	{
+		wait 0.1.
+		set sasmode to "retrograde".
+		set state to 4.
+	}
+	
+	when state = 4 and burnaltitude > (realaltitude + abs(SHIP:VERTICALSPEED)) and SHIP:VERTICALSPEED < -5 then 
+	{
+		print "FIRING SUICIDE BURN                      " at (0,10).
+		lock THROTTLE to 1.
+		set state to 3.
+	}
+	
+	when state = 3 and SHIP:VERTICALSPEED > -200 then
+	{
+		print "FINAL DESCENT                      " at (0,10).
+		gear on.
+		set state to 2.
+	}
+	
+	when state = 2 then 
+	{	
+		set climb:SETPOINT to hover:UPDATE(TIME:SECONDS, realaltitude).
+		set burnthrottle to climb:UPDATE(TIME:SECONDS, SHIP:VERTICALSPEED).
+		lock THROTTLE to burnthrottle.
+	}
+	
+	when state = 2 and abs(SHIP:VERTICALSPEED) < 30 then 
+	{
+		set sasmode to "stabilityassist".
+	}
+	
+	when state = 2 and realaltitude < 1 then
+	{
+		unlock targetdistance.
+		unlock targetdirection.
+		print "ROCKET SHUTDOWN                      " at (0,10).
+		lock THROTTLE to 0.
+		set state to 1.
+	}
+}
+
+function distance 
+{
+	parameter geo1.
+	parameter geo2.
+	return (geo1:POSITION - geo2:POSITION):MAG.
+}
+
+function direction 
+{
+	parameter geo1.
+	parameter geo2.
+	return ARCTAN2(geo1:LNG - geo2:LNG, geo1:LAT - geo2:LAT).
+}
+
+function scalar
+{
+	parameter a.
+	parameter b.
+	if b:mag = 0 
+	{
+		RETURN 1. 
+	}
+	RETURN VDOT(a, b) * (1/b:MAG).
+}
