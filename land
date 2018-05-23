@@ -62,10 +62,10 @@ until update = false
 	
 	if state = 9 
 	{
-		set steeringpitch to 90 * (35000 - SHIP:ALTITUDE) / 35000.
+		set steeringpitch to 90 * (30000 - SHIP:ALTITUDE) / 30000.
 	}
 	
-	if state = 9 and realaltitude > 35000
+	if state = 9 and realaltitude > 25000
 	{
 		lock THROTTLE to 0.
 		stage.
@@ -77,19 +77,19 @@ until update = false
 	{
 		print "ORIENTING FOR BOOSTBACK                      " at (0,10).
 		unlock STEERING.
-		set SHIP:CONTROL:PITCH to -1.
+		set SHIP:CONTROL:PITCH to -0.5.
 		set steeringdirection to targetdirection - 180.
 		set steeringpitch to 0.
-		if VANG(HEADING(steeringdirection, steeringpitch):VECTOR, SHIP:FACING:VECTOR) < 140
+		if VANG(HEADING(steeringdirection, steeringpitch):VECTOR, SHIP:FACING:VECTOR) < 160
 		{
 			set SHIP:CONTROL:PITCH to 0.
 		}
-		if VANG(HEADING(steeringdirection, steeringpitch):VECTOR, SHIP:FACING:VECTOR) < 45
+		if VANG(HEADING(steeringdirection, steeringpitch):VECTOR, SHIP:FACING:VECTOR) < 120
 		{
 			set SHIP:CONTROL:PITCH to 0.
 			lock STEERING to HEADING(steeringdirection, steeringpitch).
 		}
-		if VANG(HEADING(steeringdirection, steeringpitch):VECTOR, SHIP:FACING:VECTOR) < 2 
+		if VANG(HEADING(steeringdirection, steeringpitch):VECTOR, SHIP:FACING:VECTOR) < 0.4
 		{
 			print "FIRING BOOSTBACK BURN                      " at (0,10).
 			set SHIP:CONTROL:PITCH to 0.
@@ -110,7 +110,13 @@ until update = false
 		set state to 6.
 	}
 	
-	if state = 6 and targetdistance > olddistance
+	if state = 7 and targetdistance < 1000
+	{
+		lock THROTTLE to 0.025.
+		set state to 6.
+	}
+	
+	if (state = 6 and targetdistance > olddistance) or (state = 6 and targetdistance < 200)
 	{
 		print "BOOSTBACK BURN COMPLETE                     " at (0,10).
 		lock THROTTLE to 0.
