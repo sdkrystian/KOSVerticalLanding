@@ -1,0 +1,241 @@
+set state to 9.
+set update to true.
+
+set STEERINGMANAGER:MAXSTOPPINGTIME to 5.
+set STEERINGMANAGER:YAWPID:KD to 0.01.
+set STEERINGMANAGER:YAWPID:KI to 0.1.
+set STEERINGMANAGER:YAWPID:KD to 0.4.
+set STEERINGMANAGER:YAWTS to 3.
+
+set burnthrottle to 0.002.
+
+set pad to SHIP:GEOPOSITION.
+set olddistance to 0.
+set targetdistance to 0.
+set targetdirection to 0.
+
+set steeringdirection to 90.
+set steeringpitch to 90.
+lock STEERING to HEADING(steeringdirection, steeringpitch).
+
+lock craftheight to 2.
+set realaltitude to 100.
+lock realaltitude to ALT:RADAR - craftheight.
+lock gravity to SHIP:SENSORS:GRAV:MAG.
+lock enginethrust to SHIP:MAXTHRUST / SHIP:MASS.
+lock realenginethrust to SHIP:MAXTHRUSTAT(SHIP:Q) / SHIP:MASS.
+lock burnaltitude to (SHIP:VERTICALSPEED ^ 2) / (2 * ((realenginethrust - gravity) + ((gravity + scalar(SHIP:SENSORS:ACC, UP:VECTOR)) / 2))).
+
+set climb to pidloop(0.05, 0.1, 0.002, 0, 1).
+set hover to pidloop(0.25, 0.001, 0.6, -200, 200).  
+set eastvelpid to PIDLOOP(3, 0.01, 0.0, -35, 35).
+set northvelpid to PIDLOOP(3, 0.01, 0.0, -35, 35).
+set eastpospid to PIDLOOP(1700, 0, 100, -30, 30).
+set northpospid to PIDLOOP(1700, 0, 100, -30, 30).
+set eastpospid:SETPOINT to pad:LNG.
+set northpospid:SETPOINT to pad:LAT.
+set hover:SETPOINT to 4.
+
+clearscreen.
+sas off.
+stage.
+rcs on.
+lock THROTTLE to 1.
+
+until update = false
+{
+    set olddistance to targetdistance.
+	if (ADDONS:TR:HASIMPACT)
+	{
+		set targetdistance to distance(pad, ADDONS:TR:IMPACTPOS) + 200.
+		set targetdirection to direction(SHIP:GEOPOSITION, pad).
+	}
+	print "Max Thrust: " + round(enginethrust, 2) + "m/s           " at  (0,0).
+	print "Actual Max Thrust: " + round(realenginethrust, 2) + "m/s           " at  		(0,1).
+	print "Vertical Speed: " + round(abs(SHIP:VERTICALSPEED), 2) + "m/s           " at (0,2).
+	print "Real Altitude: " + round(realaltitude, 2) + "m           " at (0,3).
+	print "Burn Altitude: " + round(burnaltitude, 2) + "m           " at (0,4).
+	print "Booster Distance to Pad: " + round(distance(SHIP:GEOPOSITION, pad), 2) + "m           " at (0,5).
+	print "Old Distance to Pad: " + round(olddistance, 2) + "m           " at (0,6).
+	print "Impact Distance to Pad: " + round(targetdistance, 2) + "m           " at (0,7).
+	print "Steer Direction: " + round(steeringdirection, 2) + "deg           " at (0,8).
+	
+	if state = 9 
+	{
+		set steeringpitch to 90 * (30000 - SHIP:ALTITUDE) / 30000.
+	}
+	
+	if state = 9 and realaltitude > 25000
+	{
+		lock THROTTLE to 0.
+		stage.
+		ADDONS:TR:SETTARGET(pad).
+		set state to 8.
+	}
+	
+	if state = 8 
+	{
+		print "ORIENTING FOR BOOSTBACK                      " at (0,10).
+		unlock STEERING.
+		set SHIP:CONTROL:PITCH to -0.5.
+		set steeringdirection to targetdirection - 180.
+		set steeringpitch to 0.
+		if VANG(HEADING(steeringdirection, steeringpitch):VECTOR, SHIP:FACING:VECTOR) < 160
+		{
+			set SHIP:CONTROL:PITCH to 0.
+		}
+		if VANG(HEADING(steeringdirection, steeringpitch):VECTOR, SHIP:FACING:VECTOR) < 120
+		{
+			set SHIP:CONTROL:PITCH to 0.
+			lock STEERING to HEADING(steeringdirection, steeringpitch).
+		}
+		if VANG(HEADING(steeringdirection, steeringpitch):VECTOR, SHIP:FACING:VECTOR) < 0.4
+		{
+			print "FIRING BOOSTBACK BURN                      " at (0,10).
+			set SHIP:CONTROL:PITCH to 0.
+			lock STEERING to HEADING(steeringdirection, steeringpitch).
+			lock THROTTLE to 1.
+			set state to 7.
+		}
+	}
+	
+	if state = 7 and targetdistance < 10000
+	{
+		lock THROTTLE to 0.5.
+	}
+	
+	if state = 7 and targetdistance < 5000
+	{
+		lock THROTTLE to 0.15.
+		set state to 6.
+	}
+	
+	if state = 7 and targetdistance < 1000
+	{
+		lock THROTTLE to 0.025.
+		set state to 6.
+	}
+	
+	if (state = 6 and targetdistance > olddistance) or (state = 6 and targetdistance < 200)
+	{
+		print "BOOSTBACK BURN COMPLETE                     " at (0,10).
+		lock THROTTLE to 0.
+		unlock STEERING.
+		sas on.
+		set state to 5.
+	}
+	
+	if state = 5 and SHIP:VERTICALSPEED < 0	
+	{
+		lock STEERING to (-VELOCITY:SURFACE).
+		sas off.
+		set state to 4.
+	}
+	
+	if state = 4 and burnaltitude > (realaltitude + abs(SHIP:VERTICALSPEED)) and SHIP:VERTICALSPEED < -5 
+	{
+		print "FIRING SUICIDE BURN                      " at (0,10).
+		sas off.
+		lock THROTTLE to 1.
+		set eastvelpid:MINOUTPUT to -20.
+		set eastvelpid:MAXOUTPUT to 20.
+		set northvelpid:MINOUTPUT to -20.
+		set northvelpid:MAXOUTPUT to 20.
+		set eastpospid:SETPOINT to pad:LNG.
+		set northpospid:SETPOINT to pad:LAT.
+		set steeringdirection to 0.
+		set steeringpitch to 90.
+		lock STEERING to HEADING(steeringdirection, steeringpitch).
+		set state to 3.
+	}
+	
+	if state = 3
+	{	
+		steer().
+	}
+	
+	if state = 3 and SHIP:VERTICALSPEED > -200
+	{
+		set eastvelpid:MINOUTPUT to -10.
+		set eastvelpid:MAXOUTPUT to 10.
+		set northvelpid:MINOUTPUT to -10.
+		set northvelpid:MAXOUTPUT to 10.
+		print "FINAL DESCENT                      " at (0,10).
+		set eastpospid:SETPOINT to pad:LNG.
+		set northpospid:SETPOINT to pad:LAT.
+		gear on.
+		set state to 2.
+	}
+	
+	if state = 2 
+	{	
+		set climb:SETPOINT to hover:UPDATE(TIME:SECONDS, realaltitude).
+		set burnthrottle to climb:UPDATE(TIME:SECONDS, SHIP:VERTICALSPEED).
+		lock THROTTLE to burnthrottle.
+		steer().
+	}
+	
+	if state = 2 and realaltitude < 0.25
+	{
+		print "ROCKET SHUTDOWN                      " at (0,10).
+		lock THROTTLE to 0.
+		rcs off.
+		set state to 1.
+		set update to false.
+	}
+}
+
+function distance 
+{
+	parameter geo1.
+	parameter geo2.
+	return (geo1:POSITION - geo2:POSITION):MAG.
+}
+
+function direction 
+{
+	parameter geo1.
+	parameter geo2.
+	return ARCTAN2(geo1:LNG - geo2:LNG, geo1:LAT - geo2:LAT).
+}
+
+function scalar
+{
+	parameter a.
+	parameter b.
+	if b:mag = 0 
+	{
+		RETURN 1. 
+	}
+	RETURN VDOT(a, b) * (1/b:MAG).
+}
+
+function steer 
+{
+	set eastvelpid:SETPOINT to eastpospid:UPDATE(TIME:SECONDS, SHIP:GEOPOSITION:LNG).
+	set northvelpid:SETPOINT to northpospid:UPDATE(TIME:SECONDS,SHIP:GEOPOSITION:LAT).
+	local eastvelpidout is eastvelpid:UPDATE(TIME:SECONDS, cardinalvel:X).
+	local northvelpidout is northvelpid:UPDATE(TIME:SECONDS, cardinalvel:Z).
+	local eastplusnorth is max(abs(eastvelpidout), abs(northvelpidout)).
+	set steeringpitch to 90 - eastplusnorth.
+	local steeringdirnonnorm is ARCTAN2(eastvelpid:OUTPUT, northvelpid:OUTPUT).
+	if steeringdirnonnorm >= 0 
+	{
+		set steeringdirection to steeringdirnonnorm.
+	} 
+	else 
+	{
+		set steeringdirection to 360 + steeringdirnonnorm.
+	}
+}
+
+
+function cardinalvel
+{
+	local vect is SHIP:VELOCITY:SURFACE.
+	local eastvect is VCRS(UP:VECTOR, NORTH:VECTOR).
+	local eastcomp is scalar(vect, eastvect).
+	local northcomp is scalar(vect, NORTH:VECTOR).
+	local upcomp is scalar(vect, UP:VECTOR).
+	RETURN V(eastcomp, upcomp, northcomp).
+}
