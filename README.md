@@ -1,4 +1,4 @@
-# KoS-Falcon-9
+# KOS Falcon 9
 Land rockets vertically. Sometimes.
 
 Simple KoS script for boostback and landing of a rocket. Will return to launch site and attempt to land on the pad.
